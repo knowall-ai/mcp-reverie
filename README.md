@@ -1,5 +1,7 @@
 # Reverie — graph memory that dreams
 
+[![CodeRabbit Pull Request Reviews](https://img.shields.io/coderabbit/prs/github/knowall-ai/mcp-reverie?label=CodeRabbit+Reviews&labelColor=171717&color=FF570A)](https://coderabbit.ai)
+
 **Reverie** is KnowAll AI's Neo4j knowledge-graph memory for AI agents, served over MCP. Until `@knowall-ai/reverie` is published to npm, install the legacy package `@knowall-ai/mcp-neo4j-agent-memory` (0.2.x). The GitHub repository is now `knowall-ai/mcp-reverie`, and old URLs redirect.
 
 ![Reverie — graph memory that dreams](./images/reverie-banner.png)
