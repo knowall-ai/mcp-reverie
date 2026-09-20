@@ -111,7 +111,7 @@ DETACH DELETE n
 
 ## Deployment Options
 
-1. **NPM Package**: Will be published as `@knowall-ai/reverie` (currently on npm as `@knowall-ai/mcp-neo4j-agent-memory` 0.2.x; MCP server name `reverie`)
+1. **NPM Package**: Published as `@knowall-ai/reverie` (legacy package on npm was `@knowall-ai/mcp-neo4j-agent-memory`; MCP server name `reverie`)
 2. **Smithery**: Configured in `smithery.yaml` for cloud deployment
 3. **Docker**: Multi-stage Dockerfile for containerized deployment
 4. **Local Development**: Direct execution with `node build/index.js`
