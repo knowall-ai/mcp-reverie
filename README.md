@@ -2,7 +2,7 @@
 
 [![CodeRabbit Pull Request Reviews](https://img.shields.io/coderabbit/prs/github/knowall-ai/mcp-reverie?label=CodeRabbit+Reviews&labelColor=171717&color=FF570A)](https://coderabbit.ai)
 
-**Reverie** is KnowAll AI's Neo4j knowledge-graph memory for AI agents, served over MCP. Until `@knowall-ai/reverie` is published to npm, install the legacy package `@knowall-ai/mcp-neo4j-agent-memory` (0.2.x). The GitHub repository is now `knowall-ai/mcp-reverie`, and old URLs redirect.
+**Reverie** is KnowAll AI's Neo4j knowledge-graph memory for AI agents, served over MCP. It is published on npm as [`@knowall-ai/reverie`](https://www.npmjs.com/package/@knowall-ai/reverie) (successor to the legacy package `@knowall-ai/mcp-neo4j-agent-memory`). The GitHub repository is now `knowall-ai/mcp-reverie`, and old URLs redirect.
 
 ![Reverie — graph memory that dreams](./images/reverie-banner.png)
 
@@ -22,7 +22,7 @@ Reverie turns an agent's memory from a pile of facts into a **map of the entitie
 You can run this MCP server directly using npx:
 
 ```bash
-npx @knowall-ai/mcp-neo4j-agent-memory   # becomes `npx @knowall-ai/reverie` once 0.4.0 is published
+npx -y @knowall-ai/reverie
 ```
 
 Or add it to your Claude Desktop configuration:
@@ -30,9 +30,9 @@ Or add it to your Claude Desktop configuration:
 ```json
 {
   "mcpServers": {
-    "neo4j-memory": {
+    "reverie": {
       "command": "npx",
-      "args": ["@knowall-ai/mcp-neo4j-agent-memory"],
+      "args": ["-y", "@knowall-ai/reverie"],
       "env": {
         "NEO4J_URI": "bolt://localhost:7687",
         "NEO4J_USERNAME": "neo4j",
@@ -170,7 +170,7 @@ Reverie is listed in the [MCP Registry](https://registry.modelcontextprotocol.io
 ### Installing via Smithery
 
 
-To install Reverie for Claude Desktop automatically via [Smithery](https://smithery.ai/server/@knowall-ai/mcp-neo4j-agent-memory):
+To install Reverie for Claude Desktop automatically via [Smithery](https://smithery.ai/server/@knowall-ai/mcp-neo4j-agent-memory) (currently indexed under its legacy package name):
 
 ```bash
 npx -y @smithery/cli install @knowall-ai/mcp-neo4j-agent-memory --client claude
