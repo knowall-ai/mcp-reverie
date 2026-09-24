@@ -1,6 +1,6 @@
 {
   "name": "@knowall-ai/reverie",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "Reverie — graph memory that dreams. Graph-based memory system for AI agents. Store people, places, organizations as nodes. Build semantic relationships (KNOWS, WORKS_AT, CREATED). Hybrid keyword + semantic search finds partial matches and close variants. Filter by date, traverse relationships, maintain temporal context. Simple tools, LLM handles complexity. 12 tools for complete memory management.",
   "mcpName": "ai.knowall/reverie",
   "type": "module",
