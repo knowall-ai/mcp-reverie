@@ -121,13 +121,22 @@ jobs:
           # the publish below fails with "version 'x.y.z' was not found (404)"
           # and the job has to be re-run by hand after every release.
           version="${GITHUB_REF_NAME#v}"
-          for attempt in $(seq 1 30); do
-            code=$(curl -fsS -o /dev/null -w '%{http_code}' \
+          # Bound both the individual request and the loop as a whole: without
+          # --max-time a stalled response holds the step open indefinitely, and
+          # without a wall-clock deadline the retry count alone guarantees
+          # nothing about elapsed time.
+          deadline=$(( SECONDS + 300 ))
+          attempt=0
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            attempt=$(( attempt + 1 ))
+            code=$(curl -fsS --connect-timeout 10 --max-time 20 \
+              -o /dev/null -w '%{http_code}' \
               "https://registry.npmjs.org/@knowall-ai/reverie/$version" || true)
             if [ "$code" = "200" ]; then
-              echo "npm serves $version after ${attempt} attempt(s)"; exit 0
+              echo "npm serves $version after ${attempt} attempt(s), ${SECONDS}s"
+              exit 0
             fi
-            echo "attempt $attempt: npm returned ${code:-no response} for $version; retrying in 10s"
+            echo "attempt $attempt (${SECONDS}s elapsed): npm returned ${code:-no response} for $version; retrying in 10s"
             sleep 10
           done
           echo "::error::npm did not serve @knowall-ai/reverie@$version within 5 minutes"
