@@ -114,6 +114,34 @@ jobs:
           for v in "$(jq -r .version server.json)" "$(jq -r '.packages[0].version' server.json)"; do
             if [ "$v" != "$tag" ]; then echo "::error::server.json version $v does not match tag v$tag"; exit 1; fi
           done
+      - name: Wait for the npm version to be visible
+        run: |
+          # The registry validates our server.json against npm, and npm needs a
+          # moment after publish before the new version resolves. Without this
+          # the publish below fails with "version 'x.y.z' was not found (404)"
+          # and the job has to be re-run by hand after every release.
+          version="${GITHUB_REF_NAME#v}"
+          # Bound both the individual request and the loop as a whole: without
+          # --max-time a stalled response holds the step open indefinitely, and
+          # without a wall-clock deadline the retry count alone guarantees
+          # nothing about elapsed time.
+          deadline=$(( SECONDS + 300 ))
+          attempt=0
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            attempt=$(( attempt + 1 ))
+            code=$(curl -fsS --connect-timeout 10 --max-time 20 \
+              -o /dev/null -w '%{http_code}' \
+              "https://registry.npmjs.org/@knowall-ai/reverie/$version" || true)
+            if [ "$code" = "200" ]; then
+              echo "npm serves $version after ${attempt} attempt(s), ${SECONDS}s"
+              exit 0
+            fi
+            echo "attempt $attempt (${SECONDS}s elapsed): npm returned ${code:-no response} for $version; retrying in 10s"
+            sleep 10
+          done
+          echo "::error::npm did not serve @knowall-ai/reverie@$version within 5 minutes"
+          exit 1
+
       - name: Log in to the registry as knowall.ai (DNS namespace)
         run: ./mcp-publisher login dns --domain=knowall.ai --private-key="$MCP_REGISTRY_PRIVATE_KEY"
         env:
