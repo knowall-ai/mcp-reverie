@@ -1,7 +1,8 @@
 import { cosine } from './embeddings.js';
+import { FUZZY_DEFAULT_THRESHOLD, fuzzyNameScore } from './fuzzy.js';
 import { contentKeys } from './hygiene.js';
 
-export type SearchMode = 'hybrid' | 'keyword' | 'semantic' | 'exact';
+export type SearchMode = 'hybrid' | 'keyword' | 'semantic' | 'exact' | 'fuzzy';
 
 export interface Candidate {
   id: number;
@@ -11,7 +12,8 @@ export interface Candidate {
 export interface Ranked {
   id: number;
   score: number;
-  match: 'keyword' | 'semantic' | 'exact';
+  match: 'keyword' | 'semantic' | 'exact' | 'fuzzy';
+  matched?: string;
 }
 
 /** Case-insensitive equality on name, aliases or email: the lookup to run before creating a memory. */
@@ -23,12 +25,18 @@ export function exactMatches(query: string, props: Record<string, any>): boolean
 }
 
 export function keywordMatches(query: string, props: Record<string, any>): boolean {
+  return !query.trim() || keywordScore(query, props) > 0;
+}
+
+export function keywordScore(query: string, props: Record<string, any>): number {
   const trimmedQuery = query.trim().toLowerCase();
   if (!trimmedQuery) {
-    return true;
+    return 0;
   }
 
   const words = trimmedQuery.split(/\s+/);
+
+  const found = new Set<number>();
 
   // Only user content is searchable: timestamps, status and embedding fields never match.
   for (const key of contentKeys(props)) {
@@ -41,12 +49,12 @@ export function keywordMatches(query: string, props: Record<string, any>): boole
       ? value.map((item) => item?.toString() || '').join(' ').toLowerCase()
       : value.toString().toLowerCase();
 
-    if (words.some((word) => haystack.includes(word))) {
-      return true;
-    }
+    words.forEach((word, index) => {
+      if (haystack.includes(word)) found.add(index);
+    });
   }
 
-  return false;
+  return found.size / words.length;
 }
 
 export function rank(candidates: Candidate[], opts: {
@@ -55,6 +63,7 @@ export function rank(candidates: Candidate[], opts: {
   queryEmbedding?: number[];
   threshold: number;
   modelId?: string;
+  fuzzyThreshold?: number;
 }): Ranked[] {
   const trimmedQuery = opts.query.trim();
 
@@ -65,7 +74,6 @@ export function rank(candidates: Candidate[], opts: {
   }
 
   const results: Ranked[] = [];
-  const seen = new Set<number>();
 
   if (opts.mode === 'exact') {
     for (const candidate of candidates) {
@@ -76,33 +84,32 @@ export function rank(candidates: Candidate[], opts: {
     return results.sort(compareRankedBy(candidates));
   }
 
-  if (opts.mode === 'hybrid' || opts.mode === 'keyword') {
-    for (const candidate of candidates) {
-      if (keywordMatches(trimmedQuery, candidate.props)) {
-        results.push({ id: candidate.id, score: 1, match: 'keyword' });
-        seen.add(candidate.id);
-      }
+  for (const candidate of candidates) {
+    let best: Ranked | undefined;
+    // Strictly greater comparisons preserve keyword > semantic > fuzzy on ties.
+    if (opts.mode === 'hybrid' || opts.mode === 'keyword') {
+      const score = keywordScore(trimmedQuery, candidate.props);
+      if (score > 0) best = { id: candidate.id, score, match: 'keyword' };
     }
-  }
-
-  if ((opts.mode === 'hybrid' || opts.mode === 'semantic') && opts.queryEmbedding && opts.modelId) {
-    for (const candidate of candidates) {
-      if (seen.has(candidate.id)) {
-        continue;
-      }
-
-      if (candidate.props.embedding_model !== opts.modelId) {
-        continue;
-      }
-
+    if ((opts.mode === 'hybrid' || opts.mode === 'semantic') && opts.queryEmbedding && opts.modelId &&
+        candidate.props.embedding_model === opts.modelId) {
       const score = Math.max(
         similarity(opts.queryEmbedding, candidate.props.embedding),
         similarity(opts.queryEmbedding, candidate.props.name_embedding)
       );
-      if (score >= opts.threshold) {
-        results.push({ id: candidate.id, score, match: 'semantic' });
+      if (score >= opts.threshold && (!best || score > best.score)) {
+        best = { id: candidate.id, score, match: 'semantic' };
       }
     }
+    if (opts.mode === 'hybrid' || opts.mode === 'fuzzy') {
+      const values = [candidate.props.name, ...(Array.isArray(candidate.props.aliases) ? candidate.props.aliases : [])]
+        .filter((value): value is string => typeof value === 'string');
+      const fuzzy = fuzzyNameScore(trimmedQuery, values, opts.fuzzyThreshold ?? FUZZY_DEFAULT_THRESHOLD);
+      if (fuzzy && (!best || fuzzy.score > best.score)) {
+        best = { id: candidate.id, score: fuzzy.score, match: 'fuzzy', matched: fuzzy.matched };
+      }
+    }
+    if (best) results.push(best);
   }
 
   return results.sort(compareRankedBy(candidates));

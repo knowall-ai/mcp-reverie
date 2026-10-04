@@ -1,6 +1,7 @@
 import { CallToolResult, ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import neo4j from 'neo4j-driver';
 import { Embedder, embedNodes, scrub } from '../embeddings.js';
+import { FUZZY_DEFAULT_THRESHOLD } from '../fuzzy.js';
 import { Neo4jClient } from '../neo4j-client.js';
 import { readOnlyViolation } from '../cypher-guard.js';
 import { emit } from '../events.js';
@@ -80,6 +81,7 @@ export async function handleToolCall(
         const query = args.query ?? '';
         const requestedMode = args.search_mode ?? 'hybrid';
         const similarityThreshold = args.similarity_threshold ?? 0.4;
+        const fuzzyThreshold = args.fuzzy_threshold ?? FUZZY_DEFAULT_THRESHOLD;
         let orderBy = 'memory.created_at DESC';
         let hasCustomOrder = false;
         if (args.order_by) {
@@ -112,8 +114,8 @@ export async function handleToolCall(
           baseQuery += ` WHERE ${conditions.join(' AND ')}`;
         }
 
-        // Keyword mode never needs the stored vectors, so leave them out of the wire payload.
-        const propsProjection = requestedMode === 'keyword' || requestedMode === 'exact'
+        // Keyword, exact and fuzzy modes never need the stored vectors, so leave them out of the wire payload.
+        const propsProjection = requestedMode === 'keyword' || requestedMode === 'exact' || requestedMode === 'fuzzy'
           ? 'memory {.*, embedding: null, name_embedding: null}'
           : 'properties(memory)';
         baseQuery += ` RETURN id(memory) AS id, labels(memory)[0] AS label, ${propsProjection} AS props ORDER BY id(memory)`;
@@ -124,7 +126,7 @@ export async function handleToolCall(
           props: candidate.props || {}
         }));
 
-        const ranking = await rankCandidates(neo4jClient, candidates, query, requestedMode, similarityThreshold, embedder);
+        const ranking = await rankCandidates(neo4jClient, candidates, query, requestedMode, similarityThreshold, fuzzyThreshold, embedder);
         const topRanked = ranking.slice(0, limit);
         const rankedIds = topRanked.map((item) => item.id);
 
@@ -134,8 +136,8 @@ export async function handleToolCall(
         }
 
         const result = await fetchMemories(neo4jClient, rankedIds, depth, orderBy, limit, Boolean(args.include_archived));
-        const scoring = new Map<number, { score: number; match: Ranked['match'] }>(
-          topRanked.map((item) => [item.id, { score: Number(item.score.toFixed(2)), match: item.match }])
+        const scoring = new Map<number, { score: number; match: Ranked['match']; matched?: string }>(
+          topRanked.map((item) => [item.id, { score: Number(item.score.toFixed(2)), match: item.match, matched: item.matched }])
         );
 
         for (const row of result) {
@@ -148,6 +150,7 @@ export async function handleToolCall(
           if (meta) {
             row.memory._score = meta.score;
             row.memory._match = meta.match;
+            if (meta.matched !== undefined) row.memory._matched = meta.matched;
           }
         }
 
@@ -592,15 +595,16 @@ async function rankCandidates(
   query: string,
   requestedMode: SearchMode,
   threshold: number,
+  fuzzyThreshold: number,
   embedder: Embedder | null
 ): Promise<Ranked[]> {
   const trimmedQuery = query.trim();
   let effectiveMode = requestedMode;
   let queryEmbedding: number[] | undefined;
 
-  if (trimmedQuery && requestedMode !== 'keyword' && requestedMode !== 'exact') {
+  if (trimmedQuery && (requestedMode === 'hybrid' || requestedMode === 'semantic')) {
     if (!embedder) {
-      effectiveMode = 'keyword';
+      effectiveMode = requestedMode === 'semantic' ? 'keyword' : 'hybrid';
     } else {
       try {
         const lazyBatch = lazyEmbedBatch();
@@ -617,7 +621,7 @@ async function rankCandidates(
         queryEmbedding = vector;
       } catch (error) {
         console.error('Embedding unavailable for search_memories:', error);
-        effectiveMode = 'keyword';
+        effectiveMode = requestedMode === 'semantic' ? 'keyword' : 'hybrid';
         queryEmbedding = undefined;
       }
     }
@@ -628,6 +632,7 @@ async function rankCandidates(
     mode: effectiveMode,
     queryEmbedding,
     threshold,
+    fuzzyThreshold,
     modelId: embedder?.id
   });
 }
