@@ -159,10 +159,19 @@ function approxEqual(actual, expected, epsilon = 1e-9) {
   assert.deepStrictEqual(rank(names, { ...nameOptions, mode: 'fuzzy', fuzzyThreshold: 0.95 }), []);
   assert.strictEqual(rank([{ id: 1, props: { name: 'William Weeks', aliases: ['Bill Weeks', 123] } }],
     { ...nameOptions, query: 'Bill Wicks', mode: 'fuzzy' })[0].matched, 'Bill Weeks');
-  // Semantic scoring also runs for partial keyword hits; ties favour keyword, then semantic.
+  // Exact hits outrank equal-scoring keyword hits in hybrid; several fuzzy candidates are all returned.
+  const exactFirst = rank([
+    { id: 1, props: { name: 'Benjamin Weeks', created_at: '2026-02-01T00:00:00Z' } },
+    { id: 2, props: { name: 'Ben Weeks', created_at: '2026-01-01T00:00:00Z' } }
+  ], { ...nameOptions, query: 'Ben Weeks' });
+  assert.deepStrictEqual(exactFirst.map((r) => [r.id, r.match, r.score]), [[2, 'exact', 1], [1, 'keyword', 1]]);
+  const several = rank([{ id: 1, props: { name: 'Tom Grimshaw' } }, { id: 2, props: { name: 'Tim Grimshaw' } }, { id: 3, props: { name: 'Sarah Jones' } }],
+    { ...nameOptions, query: 'Grimsby', mode: 'fuzzy' });
+  assert.deepStrictEqual(several.map((r) => r.id).sort(), [1, 2]);
+  // Semantic scoring also runs for partial keyword hits; a full-name query is an exact hit; ties favour keyword, then semantic.
   const signalCandidate = [{ id: 1, props: { name: 'Benjamin Weeks', embedding_model: 'demo', embedding: [1, 0] } }];
   assert.strictEqual(rank(signalCandidate, { ...nameOptions, modelId: 'demo', queryEmbedding: [1, 0] })[0].match, 'semantic');
-  assert.strictEqual(rank(signalCandidate, { ...nameOptions, query: 'Benjamin Weeks', modelId: 'demo', queryEmbedding: [1, 0] })[0].match, 'keyword');
+  assert.strictEqual(rank(signalCandidate, { ...nameOptions, query: 'Benjamin Weeks', modelId: 'demo', queryEmbedding: [1, 0] })[0].match, 'exact');
   const tiedCandidate = [{ id: 1, props: { name: 'John', embedding_model: 'demo', embedding: [1, 0] } }];
   assert.strictEqual(rank(tiedCandidate, { ...nameOptions, query: 'Jon', fuzzyThreshold: 0, modelId: 'demo', queryEmbedding: [tokenSimilarity('jon', 'john'), Math.sqrt(1 - tokenSimilarity('jon', 'john') ** 2)] })[0].match, 'semantic');
   for (const fuzzy_threshold of [0, 0.85, 1]) assert.ok(isSearchMemoriesArgs({ search_mode: 'fuzzy', fuzzy_threshold }));

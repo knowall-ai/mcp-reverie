@@ -24,10 +24,12 @@ export function exactMatches(query: string, props: Record<string, any>): boolean
   return values.some((v) => typeof v === 'string' && v.trim().toLowerCase() === wanted);
 }
 
+/** True when any query word is a substring of a content property; an empty query matches everything. */
 export function keywordMatches(query: string, props: Record<string, any>): boolean {
   return !query.trim() || keywordScore(query, props) > 0;
 }
 
+/** Share of query words (0..1) found as substrings of any content property; timestamps, status and vectors never match. */
 export function keywordScore(query: string, props: Record<string, any>): number {
   const trimmedQuery = query.trim().toLowerCase();
   if (!trimmedQuery) {
@@ -57,6 +59,10 @@ export function keywordScore(query: string, props: Record<string, any>): number 
   return found.size / words.length;
 }
 
+/**
+ * Rank candidates for a query. `exact` keeps only equality hits; every other mode scores each candidate by its
+ * best allowed signal (exact in hybrid, keyword share, semantic cosine, fuzzy name similarity).
+ */
 export function rank(candidates: Candidate[], opts: {
   query: string;
   mode: SearchMode;
@@ -85,6 +91,11 @@ export function rank(candidates: Candidate[], opts: {
   }
 
   for (const candidate of candidates) {
+    // In hybrid, an exact name, alias or email hit is the strongest signal there is.
+    if (opts.mode === 'hybrid' && exactMatches(trimmedQuery, candidate.props)) {
+      results.push({ id: candidate.id, score: 1, match: 'exact' });
+      continue;
+    }
     let best: Ranked | undefined;
     // Strictly greater comparisons preserve keyword > semantic > fuzzy on ties.
     if (opts.mode === 'hybrid' || opts.mode === 'keyword') {
@@ -119,6 +130,9 @@ function similarity(query: number[], vector: unknown): number {
   return Array.isArray(vector) ? cosine(query, vector.map((item) => Number(item))) : 0;
 }
 
+/** On equal scores, the more precise signal ranks first. */
+const MATCH_PRIORITY: Record<Ranked['match'], number> = { exact: 0, keyword: 1, semantic: 2, fuzzy: 3 };
+
 function compareRankedBy(candidates: Candidate[]): (left: Ranked, right: Ranked) => number {
   const createdAt = new Map<number, string>(
     candidates.map((candidate) => [
@@ -130,6 +144,10 @@ function compareRankedBy(candidates: Candidate[]): (left: Ranked, right: Ranked)
   return (left, right) => {
     if (right.score !== left.score) {
       return right.score - left.score;
+    }
+
+    if (left.match !== right.match) {
+      return MATCH_PRIORITY[left.match] - MATCH_PRIORITY[right.match];
     }
 
     const leftCreatedAt = createdAt.get(left.id) ?? '';
