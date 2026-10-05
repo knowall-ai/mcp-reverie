@@ -155,12 +155,16 @@ Use UPPERCASE for relationship types:
 
 **Searching**
 - Empty query string returns all memories
-- Use search_mode: "hybrid" (the default) to return keyword matches first, then semantic matches above the threshold
+- Use search_mode: "hybrid" (the default) to rank every result by its best signal: keyword share of query words, semantic cosine, or fuzzy name similarity
 - Use search_mode: "keyword" to match any word of the query as a substring of any searchable content property (not timestamps, status or embedding fields), or search_mode: "semantic" for meaning-first recall
+- Use search_mode: "fuzzy" for name lookups when spelling may be wrong (for example speech-to-text: "Ben Wicks" can find "Benjamin Weeks")
+- Tune fuzzy_threshold (default 0.85, range 0..1) for misspelled or misheard names
+- When _match is fuzzy and the name differs, confirm with the user ("Did you mean Grimshaw?") rather than silently swapping
+- First-name nicknames that do not sound alike (Bill/William) need aliases; store full-name aliases such as "Bill Weeks" for full-name queries
 - Use search_mode: "exact" before creating: it matches only a memory whose name, alias or email equals the query, case-insensitively
 - Archived memories are excluded unless include_archived: true
 - Lower similarity_threshold (for example 0.35) to widen semantic matches, or raise it (for example 0.7) to be stricter
-- Results include _score and _match so you can explain why something was returned
+- Results include _score and _match, plus _matched (the stored name or alias) for fuzzy hits, so you can explain why something was returned
 - Use label parameter to filter by type
 - Increase depth to include more relationships (depth=2 or 3 for rich context)
 - Default limit is 10, max is 200
