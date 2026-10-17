@@ -10,7 +10,7 @@ import { guidanceTool } from './guidance-tool.js';
 export const tools: Tool[] = [
   {
     name: 'search_memories',
-    description: 'Hybrid keyword + semantic search across the knowledge graph. "Ben Weeks" can also find "Benjamin Weeks" and each result includes _score and _match.',
+    description: 'Hybrid keyword + semantic + fuzzy name search across the knowledge graph. "Ben Wicks" can find "Benjamin Weeks". Results include _score, _match and, for fuzzy hits, _matched (the stored name or alias that matched).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -44,8 +44,15 @@ export const tools: Tool[] = [
         },
         search_mode: {
           type: 'string',
-          enum: ['hybrid', 'keyword', 'semantic', 'exact'],
-          description: 'Search mode: hybrid (default), keyword-only, semantic-only, or exact (case-insensitive equality on name/aliases/email: use before creating a memory).',
+          enum: ['hybrid', 'keyword', 'semantic', 'exact', 'fuzzy'],
+          description: 'Search mode: hybrid (default), keyword-only, semantic-only, fuzzy name matching, or exact (case-insensitive equality on name/aliases/email: use before creating a memory).',
+        },
+        fuzzy_threshold: {
+          type: 'number',
+          minimum: 0,
+          maximum: 1,
+          default: 0.85,
+          description: 'Fuzzy name-match cut-off for misspelled or misheard names',
         },
         similarity_threshold: {
           type: 'number',

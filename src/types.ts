@@ -18,8 +18,9 @@ export interface SearchMemoriesArgs {
   order_by?: string;
   limit?: number;
   since_date?: string;
-  search_mode?: 'hybrid' | 'keyword' | 'semantic' | 'exact';
+  search_mode?: 'hybrid' | 'keyword' | 'semantic' | 'exact' | 'fuzzy';
   similarity_threshold?: number;
+  fuzzy_threshold?: number;
 }
 
 export interface CreateConnectionArgs {
@@ -107,7 +108,7 @@ export function isCreateMemoryArgs(args: unknown): args is CreateMemoryArgs {
     isPlainObject(args.properties);
 }
 
-const SEARCH_KEYS = ['query', 'label', 'depth', 'order_by', 'limit', 'since_date', 'search_mode', 'similarity_threshold', 'include_archived'] as const;
+const SEARCH_KEYS = ['query', 'label', 'depth', 'order_by', 'limit', 'since_date', 'search_mode', 'similarity_threshold', 'fuzzy_threshold', 'include_archived'] as const;
 
 export function isSearchMemoriesArgs(args: unknown): args is SearchMemoriesArgs {
   if (!isPlainObject(args) || !hasOnlyKeys(args, SEARCH_KEYS)) return false;
@@ -118,10 +119,14 @@ export function isSearchMemoriesArgs(args: unknown): args is SearchMemoriesArgs 
   if (searchArgs.order_by !== undefined && typeof searchArgs.order_by !== 'string') return false;
   if (searchArgs.limit !== undefined && !isIntegerInRange(searchArgs.limit, 1, SEARCH_MAX_LIMIT)) return false;
   if (searchArgs.since_date !== undefined && typeof searchArgs.since_date !== 'string') return false;
-  if (searchArgs.search_mode !== undefined && !['hybrid', 'keyword', 'semantic', 'exact'].includes(searchArgs.search_mode)) return false;
+  if (searchArgs.search_mode !== undefined && !['hybrid', 'keyword', 'semantic', 'exact', 'fuzzy'].includes(searchArgs.search_mode)) return false;
   if (searchArgs.include_archived !== undefined && typeof searchArgs.include_archived !== 'boolean') return false;
   if (searchArgs.similarity_threshold !== undefined) {
     const threshold = searchArgs.similarity_threshold;
+    if (typeof threshold !== 'number' || !Number.isFinite(threshold) || threshold < 0 || threshold > 1) return false;
+  }
+  if (searchArgs.fuzzy_threshold !== undefined) {
+    const threshold = searchArgs.fuzzy_threshold;
     if (typeof threshold !== 'number' || !Number.isFinite(threshold) || threshold < 0 || threshold > 1) return false;
   }
   return true;

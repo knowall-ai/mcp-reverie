@@ -11,7 +11,7 @@ Reverie turns an agent's memory from a pile of facts into a **map of the entitie
 ## Why Reverie
 
 - **A typed entity graph, not a fact store.** People, organisations, projects, places, concepts, meetings and decisions are nodes with typed relationships. "Who at the Irish FA have we talked to about Winnie?" is a graph walk, not a similarity search.
-- **Search that finds "Ben" when you say "Benjamin".** Hybrid keyword + semantic search, with local embeddings by default (no API key) and OpenAI, Azure OpenAI, Ollama or Voyage a config switch away.
+- **Search that finds "Ben" when you say "Benjamin".** Hybrid keyword + semantic + fuzzy name search, with local embeddings by default (no API key) and OpenAI, Azure OpenAI, Ollama or Voyage a config switch away.
 - **It dreams.** A `dream` tool merges duplicates safely, canonicalises labels, re-embeds, counts orphans and flags nodes that have become property dumps, so a nightly job can keep the graph clean.
 - **One graph, any agent.** KnowAll runs Sallie (OpenClaw) and Poppie (Hermes) against the same conventions; Reverie is how they share what they know.
 - **LLM-driven, transparent tools.** Simple atomic operations; the model does the entity recognition and conflict resolution, and every action is explicit.
@@ -66,22 +66,23 @@ Unlike traditional approaches that embed complex logic in tools, this server pro
 - **Transparent operations**: Every action is explicit and predictable
 - **Maximum flexibility**: The LLM can implement any strategy without tool limitations
 
-### Search Behavior
-`search_memories` is hybrid: keyword hits (any word of the query as a substring of any searchable content property) rank first, then semantic matches above a similarity threshold. See **Search** below.
+### Search Behaviour
+`search_memories` is hybrid: each result ranks by its best keyword, semantic or fuzzy name signal. See **Search** below.
 
 This approach makes the system more powerful and adaptable, as improvements in LLM capabilities directly translate to better memory management.
 
 ## Search
 
-`search_memories` now supports three modes:
-- `hybrid` (default): keyword hits score `1`, then semantic matches add close variants such as `Benjamin Weeks` for `Ben Weeks`
+`search_memories` supports four matching signals — keyword, semantic, fuzzy and exact — through these modes:
+- `hybrid` (default): rank by the best signal — keyword share of query words, semantic cosine or fuzzy name similarity
 - `keyword`: any word of the query as a substring of any searchable content property (timestamps, `status` and embedding fields are never matched)
-- `semantic`: uses embeddings only when available, with graceful fallback to keyword behavior if embeddings are unavailable
+- `semantic`: embeddings only; if embeddings are unavailable it falls back to keyword matching (and `hybrid` keeps its keyword and fuzzy signals)
+- `fuzzy`: match misspelled or misheard names and aliases using spelling, prefixes and phonetics; "Ben Wicks" can find "Benjamin Weeks" without embeddings
 - `exact`: case-insensitive equality on `name`, `aliases` or `email`; the precise lookup to run before creating a memory, so "ben weeks" finds exactly "Ben Weeks" and nothing else
 
 Archived memories (`status = 'archived'`) are left out of results and of `list_memory_labels` unless `include_archived: true` is passed. Returned relationships carry `_start` and `_end` node ids, so a connection's direction is always recoverable.
 
-Use `similarity_threshold` (default `0.4`; must be between `0` and `1`, other values are rejected) to control how strict semantic matches are. Results include `_score` and `_match` on each returned `memory` object so callers can explain why a memory was returned.
+Use `similarity_threshold` (default `0.4`; must be between `0` and `1`, other values are rejected) to control how strict semantic matches are. Use `fuzzy_threshold` (default `0.85`, range `0`–`1`) for fuzzy strictness. Results include `_score`, `_match` and, for fuzzy hits, `_matched` (the stored name or alias). Confirm differing names with the user; nicknames such as Bill/William need `aliases`.
 
 ### Neo4j Enterprise Support
 
@@ -90,10 +91,10 @@ This server now supports connecting to specific databases in Neo4j Enterprise Ed
 ### Memory Tools
 
 - `search_memories`: Search and retrieve memories from the knowledge graph
-  - **Hybrid search**: Blend keyword and semantic search; `Ben Weeks` can also find `Benjamin Weeks`
-  - Choose `search_mode` = `hybrid`, `keyword`, or `semantic`
-  - Tune semantic strictness with `similarity_threshold` (default `0.4`)
-  - Returned memories include `_score` and `_match` metadata
+  - **Hybrid search**: Blend keyword, semantic and fuzzy name search; `Ben Wicks` can find `Benjamin Weeks`
+  - Choose `search_mode` = `hybrid`, `keyword`, `semantic`, `fuzzy` or `exact`
+  - Tune `similarity_threshold` (default `0.4`) and `fuzzy_threshold` (default `0.85`)
+  - Returned memories include `_score`, `_match` and `_matched` for fuzzy hits
   - Filter by memory type (case-insensitive, so `person` and `Person` both work), date, depth, result limit, and sort order
 
 - `create_memory`: Create a new memory in the knowledge graph
@@ -220,7 +221,7 @@ Set `REVERIE_EMBEDDINGS` to choose the embedding provider used by hybrid and sem
 
 Use `REVERIE_EMBEDDING_MODEL` to override the model name for any provider. Remote providers batch up to 64 texts per request, time out after `REVERIE_EMBED_TIMEOUT_MS` (default 30000, max 120000), and must be reached over https; plain http is only accepted for localhost.
 
-The `local` provider downloads its model (about 23 MB) from Hugging Face on first use and caches it. If that download fails, or any provider errors, search degrades to keyword matching for that call and the error is logged to stderr. Set `REVERIE_EMBEDDINGS=none` to turn embeddings off entirely.
+The `local` provider downloads its model (about 23 MB) from Hugging Face on first use and caches it. If that download fails, or any provider errors, semantic search falls back to keyword matching and hybrid retains keyword + fuzzy matching for that call and the error is logged to stderr. Set `REVERIE_EMBEDDINGS=none` to turn embeddings off entirely.
 
 Each node stores two vectors: `embedding` (label, name and every text property) and `name_embedding` (label, name and aliases only), plus `embedding_model` and `embedded_at`. A semantic score is the better of the two, so a short query like `Ben Weeks` still matches a richly described `Benjamin Weeks`. None of these fields are ever returned by the tools.
 
@@ -374,7 +375,7 @@ I found several people matching your search:
 The most likely match appears to be Ben Weeks, the Software Engineer.
 ```
 
-Note: The search finds ANY word from your query, allowing the LLM to present all potentially relevant results and identify the best match based on context.
+Keyword matching finds ANY word from your query and scores the fraction found. Hybrid search also considers semantic and fuzzy name matches, ranking each result by its best signal.
 
 #### Recent Memories (Last 7 Days)
 ```

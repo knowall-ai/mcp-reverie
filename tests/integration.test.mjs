@@ -137,6 +137,16 @@ test('exact search matches only equality on name, alias or email, case-insensiti
   assert.equal(partial.length, 0, 'a partial name is not an exact match');
 });
 
+test('fuzzy search finds a misheard name and reports which stored name matched', async () => {
+  const hits = await ok('search_memories', { query: 'Ben Wicks', search_mode: 'fuzzy', depth: 0 });
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].memory._match, 'fuzzy');
+  assert.equal(hits[0].memory._matched, 'Benjamin Weeks');
+  const strict = await ok('search_memories', { query: 'Ben Wicks', search_mode: 'fuzzy', fuzzy_threshold: 0.95, depth: 0 });
+  assert.equal(strict.length, 0);
+  await fails('search_memories', { query: 'Ben', fuzzy_threshold: 2 }, /Invalid search_memories/);
+});
+
 test('archived memories are hidden from search and label listing unless asked for', async () => {
   const id = (await ok('create_memory', { label: 'person', properties: { name: 'Old Contact', status: 'archived' } })).memory._id;
   assert.equal((await ok('search_memories', { query: 'Old Contact', search_mode: 'keyword', depth: 0 })).length, 0);

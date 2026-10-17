@@ -1,8 +1,11 @@
 #!/usr/bin/env node
 
 import assert from 'assert';
+import { fuzzyNameScore, jaroWinkler, nameTokens, phoneticCodes, tokenSimilarity } from '../build/fuzzy.js';
+import { performance } from 'node:perf_hooks';
+import { handleToolCall } from '../build/handlers/index.js';
 import { cosine, createEmbedder, embeddingText, nameText, scrub } from '../build/embeddings.js';
-import { exactMatches, keywordMatches, rank } from '../build/search.js';
+import { exactMatches, keywordMatches, keywordScore, rank } from '../build/search.js';
 import { contentKeys, factLikeKeys, maxProperties } from '../build/hygiene.js';
 import { readOnlyViolation, stripComments } from '../build/cypher-guard.js';
 import { cypherIdentifier, isCreateConnectionArgs, isCreateMemoryArgs, isDreamArgs, isMemoryStatsArgs, isQueryMemoriesArgs, isSearchMemoriesArgs } from '../build/types.js';
@@ -111,6 +114,92 @@ function approxEqual(actual, expected, epsilon = 1e-9) {
   assert.deepStrictEqual(rank([{ id: 1, props: { name: 'Ben Weeks' } }, { id: 2, props: { name: 'Benjamin Weeks' } }], { query: 'ben weeks', mode: 'exact', threshold: 0.4 }).map((r) => [r.id, r.match]), [[1, 'exact']]);
   assert.strictEqual(keywordMatches('Ben Weeks', { name: 'Benjamin' }), true);
   assert.strictEqual(keywordMatches('Benjamin', { name: 'Ben' }), false);
+
+  // Fuzzy names: spelling, prefixes, phonetics, diacritics and full-name aliases.
+  approxEqual(jaroWinkler('martha', 'marhta'), 0.961, 0.001);
+  assert.strictEqual(jaroWinkler('', 'x'), 0);
+  assert.strictEqual(jaroWinkler('same', 'same'), 1);
+  assert.deepStrictEqual(nameTokens(' Zoë—SMITH 42! '), ['zoe', 'smith', '42']);
+  assert.strictEqual(tokenSimilarity('bo', 'bob'), 0);
+  assert.strictEqual(tokenSimilarity('bo', 'bo'), 1);
+  assert.deepStrictEqual(phoneticCodes('a'), []);
+  assert.ok(phoneticCodes('catherine').includes('K0RN'));
+  const benFuzzy = fuzzyNameScore('Ben Wicks', ['Benjamin Weeks'], 0.85);
+  approxEqual(benFuzzy.score, 0.9);
+  assert.strictEqual(benFuzzy.matched, 'Benjamin Weeks');
+  for (const [query, value] of [
+    ['Grimsby', 'Tom Grimshaw'], ['Grimshore', 'Tom Grimshaw'],
+    ['Steven Smyth', 'Stephen Smith'], ['Jon', 'John'],
+    ['Catherine', 'Kathryn Jones'], ['Zoë', 'Zoe Smith']
+  ]) {
+    assert.ok(fuzzyNameScore(query, [value], 0.85), query + ' should match ' + value);
+  }
+  approxEqual(jaroWinkler('grimsby', 'grimshaw'), 0.868, 0.001);
+  for (const [query, value] of [
+    ['Ben Wicks', 'Ben Walker'], ['Jones', 'James'], ['Ben Wicks', 'Bob Wicks']
+  ]) assert.strictEqual(fuzzyNameScore(query, [value], 0.85), null);
+  assert.strictEqual(fuzzyNameScore('!!!', ['Ben'], 0.85), null);
+  assert.strictEqual(fuzzyNameScore('Ben', ['', '!!!'], 0.85), null);
+  assert.strictEqual(fuzzyNameScore('Bill Wicks', ['William Weeks', 'Bill Weeks'], 0.85).matched, 'Bill Weeks');
+  assert.strictEqual(keywordScore('Ben Wicks', { name: 'Ben Walker' }), 0.5);
+  assert.strictEqual(keywordScore('Ben Wicks', { name: 'Ben', aliases: ['Wicks'] }), 1);
+  assert.strictEqual(keywordScore(' ', {}), 0);
+  assert.strictEqual(keywordMatches(' ', {}), true);
+  const names = ['Benjamin Weeks', 'Ben Walker', 'Bob Wicks', 'Benjamin Franklin', 'Sarah Jones']
+    .map((name, id) => ({ id, props: { name } }));
+  const nameOptions = { query: 'Ben Wicks', mode: 'hybrid', threshold: 0.4 };
+  const nameRanked = rank(names, nameOptions);
+  assert.deepStrictEqual(nameRanked[0], { id: 0, score: 0.9, match: 'fuzzy', matched: 'Benjamin Weeks' });
+  assert.deepStrictEqual(nameRanked.find((r) => r.id === 1), { id: 1, score: 0.5, match: 'keyword' });
+  assert.ok(!nameRanked.some((r) => r.id === 4));
+  const keywordRanked = rank(names, { ...nameOptions, mode: 'keyword' });
+  assert.ok(keywordRanked.length > 0 && keywordRanked.every((r) => r.match === 'keyword'));
+  const fuzzyRanked = rank(names, { ...nameOptions, mode: 'fuzzy' });
+  assert.deepStrictEqual(fuzzyRanked, [nameRanked[0]]);
+  assert.deepStrictEqual(rank(names, { ...nameOptions, mode: 'fuzzy', fuzzyThreshold: 0.95 }), []);
+  assert.strictEqual(rank([{ id: 1, props: { name: 'William Weeks', aliases: ['Bill Weeks', 123] } }],
+    { ...nameOptions, query: 'Bill Wicks', mode: 'fuzzy' })[0].matched, 'Bill Weeks');
+  // Exact hits outrank equal-scoring keyword hits in hybrid; several fuzzy candidates are all returned.
+  const exactFirst = rank([
+    { id: 1, props: { name: 'Benjamin Weeks', created_at: '2026-02-01T00:00:00Z' } },
+    { id: 2, props: { name: 'Ben Weeks', created_at: '2026-01-01T00:00:00Z' } }
+  ], { ...nameOptions, query: 'Ben Weeks' });
+  assert.deepStrictEqual(exactFirst.map((r) => [r.id, r.match, r.score]), [[2, 'exact', 1], [1, 'keyword', 1]]);
+  const several = rank([{ id: 1, props: { name: 'Tom Grimshaw' } }, { id: 2, props: { name: 'Tim Grimshaw' } }, { id: 3, props: { name: 'Sarah Jones' } }],
+    { ...nameOptions, query: 'Grimsby', mode: 'fuzzy' });
+  assert.deepStrictEqual(several.map((r) => r.id).sort(), [1, 2]);
+  // Semantic scoring also runs for partial keyword hits; a full-name query is an exact hit; ties favour keyword, then semantic.
+  const signalCandidate = [{ id: 1, props: { name: 'Benjamin Weeks', embedding_model: 'demo', embedding: [1, 0] } }];
+  assert.strictEqual(rank(signalCandidate, { ...nameOptions, modelId: 'demo', queryEmbedding: [1, 0] })[0].match, 'semantic');
+  assert.strictEqual(rank(signalCandidate, { ...nameOptions, query: 'Benjamin Weeks', modelId: 'demo', queryEmbedding: [1, 0] })[0].match, 'exact');
+  const tiedCandidate = [{ id: 1, props: { name: 'John', embedding_model: 'demo', embedding: [1, 0] } }];
+  assert.strictEqual(rank(tiedCandidate, { ...nameOptions, query: 'Jon', fuzzyThreshold: 0, modelId: 'demo', queryEmbedding: [tokenSimilarity('jon', 'john'), Math.sqrt(1 - tokenSimilarity('jon', 'john') ** 2)] })[0].match, 'semantic');
+  for (const fuzzy_threshold of [0, 0.85, 1]) assert.ok(isSearchMemoriesArgs({ search_mode: 'fuzzy', fuzzy_threshold }));
+  for (const fuzzy_threshold of [-0.1, 1.1, NaN, Infinity, '0.85', null]) assert.ok(!isSearchMemoriesArgs({ fuzzy_threshold }));
+
+  // Exercise handler projection, metadata and unavailable-embedder fallback without a database.
+  for (const mode of ['fuzzy', 'hybrid', 'semantic']) {
+    const queries = [];
+    const client = { executeQuery: async (cypher) => {
+      queries.push(cypher);
+      return queries.length === 1 ? names : names.map((n) => ({ memory: { _id: n.id, name: n.props.name } }));
+    } };
+    const response = await handleToolCall('search_memories', { query: 'Ben Wicks', search_mode: mode }, client, null);
+    const rows = JSON.parse(response.content[0].text);
+    assert.strictEqual(rows[0].memory._match, mode === 'semantic' ? 'keyword' : 'fuzzy');
+    if (mode !== 'semantic') assert.strictEqual(rows[0].memory._matched, 'Benjamin Weeks');
+    if (mode === 'fuzzy') assert.ok(queries[0].includes('embedding: null, name_embedding: null'));
+  }
+
+  // Deterministic, distinct two-token names exercise a cold phonetic cache.
+  const synthetic = Array.from({ length: 10_000 }, (_, id) => ({
+    id, props: { name: 'Person' + id.toString(36).padStart(4, 'a') + ' Family' + (id * 7919).toString(36).padStart(6, 'b') }
+  }));
+  const started = performance.now();
+  rank(synthetic, nameOptions);
+  const elapsed = performance.now() - started;
+  assert.ok(elapsed < 1500, '10,000-candidate hybrid search took ' + elapsed.toFixed(1) + ' ms');
+  console.log('Fuzzy performance: 10,000 candidates in ' + elapsed.toFixed(1) + ' ms');
 
   const bloated = {
     name: 'Ben Weeks', email: 'ben@example.com', _id: 1, _labels: ['Person'], created_at: 'x', embedding: [1],
