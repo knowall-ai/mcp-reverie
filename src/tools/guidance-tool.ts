@@ -164,7 +164,8 @@ Use UPPERCASE for relationship types:
 - Use search_mode: "exact" before creating: it matches only a memory whose name, alias or email equals the query, case-insensitively
 - Archived memories are excluded unless include_archived: true
 - Lower similarity_threshold (for example 0.35) to widen semantic matches, or raise it (for example 0.7) to be stricter
-- Results include _score and _match, plus _matched (the stored name or alias) for fuzzy hits, so you can explain why something was returned
+- Each result's memory carries _score (0..1) and _match (exact | keyword | semantic | fuzzy), plus _matched (the stored name or alias) for fuzzy hits, so you can explain why something was returned
+- Reading _score: exact is 1; keyword is the share of query words found; semantic is the cosine similarity; fuzzy is the name similarity (at least fuzzy_threshold). A semantic-only hit below about 0.5 is weak and often unrelated, so do not present it as a match
 - Use label parameter to filter by type
 - Increase depth to include more relationships (depth=2 or 3 for rich context)
 - Default limit is 10, max is 200

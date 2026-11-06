@@ -10,7 +10,7 @@ import { guidanceTool } from './guidance-tool.js';
 export const tools: Tool[] = [
   {
     name: 'search_memories',
-    description: 'Hybrid keyword + semantic + fuzzy name search across the knowledge graph. "Ben Wicks" can find "Benjamin Weeks". Results include _score, _match and, for fuzzy hits, _matched (the stored name or alias that matched).',
+    description: 'Hybrid keyword + semantic + fuzzy name search across the knowledge graph. "Ben Wicks" can find "Benjamin Weeks". Each result\'s memory carries _score (0-1: exact = 1, keyword = share of query words found, semantic = cosine similarity, fuzzy = name similarity), _match (exact | keyword | semantic | fuzzy) and, for fuzzy hits, _matched (the stored name or alias that matched: "did you mean <_matched>?"). A semantic-only hit below about 0.5 is weak and often unrelated.',
     inputSchema: {
       type: 'object',
       properties: {

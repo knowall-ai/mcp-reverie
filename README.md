@@ -509,6 +509,12 @@ CI runs the same suite against a Neo4j service container on every pull request a
 build if coverage drops below the gate. The first semantic search downloads the local embedding
 model (about 23 MB); CI caches it.
 
+A second CI check, `Version bumped with src/` (`scripts/check-version.mjs`), keeps the version
+honest: `server.json`'s `version` and each `packages[].version` must equal `package.json`'s, and a
+pull request that changes `src/` must raise `package.json`'s version above the base branch's
+(SemVer). To fix it, run `npm version patch --no-git-tag-version` and set the same version in both
+places in `server.json`.
+
 ### Interactive Testing with MCP Inspector
 
 For interactive testing and debugging, use the MCP Inspector:

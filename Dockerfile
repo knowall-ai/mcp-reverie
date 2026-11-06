@@ -28,6 +28,8 @@ WORKDIR /app
 # Copy the build output and node_modules from the builder stage
 COPY --from=builder /app/build ./build
 COPY --from=builder /app/node_modules ./node_modules
+# package.json is where the server reads its version (serverInfo) at run time
+COPY --from=builder /app/package.json ./package.json
 
 # Don't set default environment variables to ensure proper tool discovery
 # These should be provided at runtime
