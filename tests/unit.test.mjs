@@ -191,6 +191,21 @@ function approxEqual(actual, expected, epsilon = 1e-9) {
     if (mode === 'fuzzy') assert.ok(queries[0].includes('embedding: null, name_embedding: null'));
   }
 
+  // Every search_memories result carries its score (0..1) and how it matched, in every mode.
+  for (const [mode, query] of [['hybrid', 'Ben Wicks'], ['keyword', 'Weeks'], ['exact', 'Benjamin Weeks'], ['fuzzy', 'Ben Wicks']]) {
+    let calls = 0;
+    const client = { executeQuery: async () => (calls++ === 0 ? names : names.map((n) => ({ memory: { _id: n.id, name: n.props.name } }))) };
+    const rows = JSON.parse((await handleToolCall('search_memories', { query, search_mode: mode }, client, null)).content[0].text);
+    assert.ok(rows.length > 0, `${mode} found nothing for ${query}`);
+    for (const row of rows) {
+      assert.strictEqual(typeof row.memory._score, 'number', `${mode}: _score missing`);
+      assert.ok(row.memory._score >= 0 && row.memory._score <= 1, `${mode}: _score ${row.memory._score} outside 0..1`);
+      assert.ok(['exact', 'keyword', 'semantic', 'fuzzy'].includes(row.memory._match), `${mode}: _match ${row.memory._match}`);
+      assert.strictEqual('_matched' in row.memory, row.memory._match === 'fuzzy', `${mode}: _matched only on fuzzy hits`);
+    }
+    if (mode === 'exact') assert.deepStrictEqual(rows.map((r) => [r.memory._score, r.memory._match]), [[1, 'exact']]);
+  }
+
   // Deterministic, distinct two-token names exercise a cold phonetic cache.
   const synthetic = Array.from({ length: 10_000 }, (_, id) => ({
     id, props: { name: 'Person' + id.toString(36).padStart(4, 'a') + ' Family' + (id * 7919).toString(36).padStart(6, 'b') }

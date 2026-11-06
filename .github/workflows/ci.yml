@@ -38,3 +38,32 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm run test:unit
+
+  version:
+    # #34 (fuzzy matching) merged without a version bump, so every install kept reporting 0.5.3
+    # while running whichever build it happened to fetch. Code under src/ ships to users, so a PR
+    # that changes it must also change the version, and server.json must agree with package.json.
+    name: Version bumped with src/
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: src/ changed, so package.json version must change
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          base="$(git merge-base "$BASE_SHA" HEAD)"
+          new="$(node -p "require('./package.json').version")"
+          for v in $(node -p "const s=require('./server.json'); [s.version, ...s.packages.map(p => p.version)].join(' ')"); do
+            if [ "$v" != "$new" ]; then echo "::error::server.json version $v does not match package.json $new"; exit 1; fi
+          done
+          if git diff --quiet "$base" HEAD -- src/; then echo "src/ unchanged; no bump needed"; exit 0; fi
+          old="$(git show "$base:package.json" | node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).version")"
+          if [ "$old" = "$new" ]; then
+            echo "::error::src/ changed but package.json is still $old. Bump the version (npm version patch --no-git-tag-version, plus server.json)."
+            exit 1
+          fi
+          echo "src/ changed; version $old -> $new"

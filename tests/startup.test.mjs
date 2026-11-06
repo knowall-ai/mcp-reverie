@@ -2,7 +2,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { SERVER_ENTRY } from './helpers/mcp-client.mjs';
+import { readFileSync } from 'node:fs';
+import { McpClient, SERVER_ENTRY } from './helpers/mcp-client.mjs';
 import { mcpRequest, runServe, startServe } from './helpers/http.mjs';
 
 function run(env) {
@@ -114,5 +115,18 @@ test('serve without Neo4j: health, auth, 404, 503 and MCP over HTTP', async () =
   } finally {
     const { signal, code } = await serve.close();
     assert.ok(signal === 'SIGTERM' || code === 0, 'shuts down on SIGTERM');
+  }
+});
+
+test('serverInfo reports the package.json version, not a hard-coded one', async () => {
+  const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  // initialize never touches Neo4j, so an unreachable database is fine here.
+  const client = new McpClient({ NEO4J_URI: 'bolt://127.0.0.1:1', NEO4J_USERNAME: 'neo4j', NEO4J_PASSWORD: 'x', REVERIE_EMBEDDINGS: 'none' });
+  try {
+    const init = await client.request('initialize', { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'test', version: '0' } }, 15000);
+    assert.equal(init.result.serverInfo.name, 'reverie');
+    assert.equal(init.result.serverInfo.version, version);
+  } finally {
+    await client.close();
   }
 });

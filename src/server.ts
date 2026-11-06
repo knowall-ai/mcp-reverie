@@ -6,6 +6,9 @@ import { handleToolCall } from './handlers/index.js';
 import { Neo4jClient } from './neo4j-client.js';
 import { tools } from './tools/definitions.js';
 import { Neo4jServerConfig } from './types.js';
+import { VERSION } from './version.js';
+
+export { VERSION };
 
 /** A misconfigured provider (missing key, http endpoint…) must not stop the server; search degrades to keyword. */
 export function safeCreateEmbedder(): Embedder | null {
@@ -16,8 +19,6 @@ export function safeCreateEmbedder(): Embedder | null {
     return null;
   }
 }
-
-export const VERSION = '0.5.0';
 
 /** The MCP protocol server with Reverie's tools, bound to a (possibly absent) Neo4j client and embedder. */
 export function createMcpServer(neo4j: Neo4jClient | null, embedder: Embedder | null): Server {
