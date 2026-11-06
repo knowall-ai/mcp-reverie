@@ -18,6 +18,7 @@ import { emit, eventsPath, readSince, tail, MAX_BYTES, START_CURSOR } from '../b
 import { snapshotAsDiff, parseLimit, cleanProps, clampLimit, diffSnapshot, isEmptyDiff, presenceStats, state, toEpochSeconds, MAX_LIMIT } from '../build/brain.js';
 import { isAuthorized } from '../build/http-server.js';
 import { neo4jConfigError, neo4jConfigFromEnv } from '../build/config.js';
+import { compareSemver, versionProblem } from '../scripts/check-version.mjs';
 
 function approxEqual(actual, expected, epsilon = 1e-9) {
   assert.ok(Math.abs(actual - expected) <= epsilon, `expected ${actual} ≈ ${expected}`);
@@ -191,7 +192,7 @@ function approxEqual(actual, expected, epsilon = 1e-9) {
     if (mode === 'fuzzy') assert.ok(queries[0].includes('embedding: null, name_embedding: null'));
   }
 
-  // Every search_memories result carries its score (0..1) and how it matched, in every mode.
+  // Score and match metadata on search_memories results for the hybrid, keyword, exact and fuzzy modes.
   for (const [mode, query] of [['hybrid', 'Ben Wicks'], ['keyword', 'Weeks'], ['exact', 'Benjamin Weeks'], ['fuzzy', 'Ben Wicks']]) {
     let calls = 0;
     const client = { executeQuery: async () => (calls++ === 0 ? names : names.map((n) => ({ memory: { _id: n.id, name: n.props.name } }))) };
@@ -528,6 +529,24 @@ function approxEqual(actual, expected, epsilon = 1e-9) {
     assert.strictEqual(presenceStats({ REVERIE_USAGE_STATS_PATH: '', REVERIE_BOOST_STATE_PATH: path.join(dir, 'bad.json') }).boost, null);
     assert.strictEqual(presenceStats({ REVERIE_USAGE_STATS_PATH: '', REVERIE_BOOST_STATE_PATH: path.join(dir, 'missing.json') }).boost, null);
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  // ---- CI version guard (scripts/check-version.mjs)
+  {
+    const server = (v, pv = v) => ({ version: v, packages: [{ version: pv }] });
+    const ok = (o) => assert.strictEqual(versionProblem(o), null);
+    const bad = (o, re) => assert.match(versionProblem(o) ?? '', re);
+    ok({ pkgVersion: '0.5.4', server: server('0.5.4'), baseVersion: '0.5.3', srcChanged: true });
+    bad({ pkgVersion: '0.5.3', server: server('0.5.3'), baseVersion: '0.5.3', srcChanged: true }, /not above/);
+    bad({ pkgVersion: '0.5.3', server: server('0.5.3'), baseVersion: '0.5.4', srcChanged: true }, /not above/);
+    ok({ pkgVersion: '0.5.3', server: server('0.5.3'), baseVersion: '0.5.3', srcChanged: false });
+    bad({ pkgVersion: '0.5.4', server: { packages: [{ version: '0.5.4' }] }, baseVersion: '0.5.3', srcChanged: false }, /server\.json version is missing/);
+    bad({ pkgVersion: '0.5.4', server: server('0.5.4', null), baseVersion: '0.5.3', srcChanged: false }, /packages\[0\]\.version is missing/);
+    bad({ pkgVersion: '0.5.4', server: { version: '0.5.4', packages: [] }, baseVersion: '0.5.3', srcChanged: false }, /no packages/);
+    assert.ok(compareSemver('0.10.0', '0.9.9') > 0);
+    assert.ok(compareSemver('1.0.0-rc.1', '1.0.0') < 0);
+    assert.ok(compareSemver('1.0.0-rc.10', '1.0.0-rc.2') > 0);
+    assert.throws(() => compareSemver('latest', '1.0.0'));
   }
 
   // ---- Neo4j env parsing: the password is never altered

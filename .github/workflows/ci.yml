@@ -51,19 +51,11 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-      - name: src/ changed, so package.json version must change
+      - name: server.json matches package.json; src/ changes raise the version
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           base="$(git merge-base "$BASE_SHA" HEAD)"
-          new="$(node -p "require('./package.json').version")"
-          for v in $(node -p "const s=require('./server.json'); [s.version, ...s.packages.map(p => p.version)].join(' ')"); do
-            if [ "$v" != "$new" ]; then echo "::error::server.json version $v does not match package.json $new"; exit 1; fi
-          done
-          if git diff --quiet "$base" HEAD -- src/; then echo "src/ unchanged; no bump needed"; exit 0; fi
-          old="$(git show "$base:package.json" | node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).version")"
-          if [ "$old" = "$new" ]; then
-            echo "::error::src/ changed but package.json is still $old. Bump the version (npm version patch --no-git-tag-version, plus server.json)."
-            exit 1
-          fi
-          echo "src/ changed; version $old -> $new"
+          git show "$base:package.json" > "$RUNNER_TEMP/base-package.json"
+          if git diff --quiet "$base" HEAD -- src/; then changed=0; else changed=1; fi
+          node scripts/check-version.mjs "$RUNNER_TEMP/base-package.json" "$changed"
